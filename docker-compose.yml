@@ -1,0 +1,42 @@
+services:
+  app:
+    image: ghcr.io/CHANGE_ME/career:latest
+    ports: ["127.0.0.1:3010:3000"]
+    env_file: .env
+    depends_on: [db, redis]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "1.5", memory: 1500m }
+
+  worker:
+    image: ghcr.io/CHANGE_ME/career:latest
+    command: ["node", "dist/worker.js"]
+    env_file: .env
+    depends_on: [db, redis]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "1.5", memory: 1500m }
+
+  db:
+    image: pgvector/pgvector:pg16
+    ports: ["127.0.0.1:5433:5432"]      # 5432 может быть занят
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: career
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    command: >
+      postgres -c shared_buffers=768MB -c work_mem=16MB
+               -c max_connections=60 -c effective_cache_size=2GB
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 2500m }
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 200mb --maxmemory-policy allkeys-lru
+    ports: ["127.0.0.1:6380:6379"]
+    restart: unless-stopped
