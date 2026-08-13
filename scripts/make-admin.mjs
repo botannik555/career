@@ -9,5 +9,5 @@ if (!password || password.length < 12) {
 }
 const salt = crypto.randomBytes(16);
 const key = crypto.scryptSync(password, salt, 64, { N: 16384, r: 8, p: 1 });
-console.log(`ADMIN_PASSWORD_HASH=scrypt$${salt.toString('hex')}$${key.toString('hex')}`);
+console.log(`ADMIN_PASSWORD_HASH=scrypt:${salt.toString('hex')}:${key.toString('hex')}`);
 console.log(`AUTH_SECRET=${crypto.randomBytes(32).toString('hex')}`);

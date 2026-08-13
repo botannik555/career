@@ -1,23 +1,26 @@
+name: career
 services:
   app:
-    image: ghcr.io/CHANGE_ME/career:latest
+    image: career:latest
+    build: .
     ports: ["127.0.0.1:3010:3000"]
     env_file: .env
     depends_on: [db, redis]
     restart: unless-stopped
     deploy:
       resources:
-        limits: { cpus: "1.5", memory: 1500m }
+        limits: { cpus: "1.5", memory: 700m }
 
   worker:
-    image: ghcr.io/CHANGE_ME/career:latest
+    image: career:latest
+    build: .
     command: ["node", "dist/worker.js"]
     env_file: .env
     depends_on: [db, redis]
     restart: unless-stopped
     deploy:
       resources:
-        limits: { cpus: "1.5", memory: 1500m }
+        limits: { cpus: "1.5", memory: 700m }
 
   db:
     image: pgvector/pgvector:pg16
@@ -28,15 +31,15 @@ services:
     volumes:
       - ./pgdata:/var/lib/postgresql/data
     command: >
-      postgres -c shared_buffers=768MB -c work_mem=16MB
-               -c max_connections=60 -c effective_cache_size=2GB
+      postgres -c shared_buffers=256MB -c work_mem=8MB
+               -c max_connections=30 -c effective_cache_size=768MB
     restart: unless-stopped
     deploy:
       resources:
-        limits: { cpus: "1.0", memory: 2500m }
+        limits: { cpus: "1.0", memory: 900m }
 
   redis:
     image: redis:7-alpine
-    command: redis-server --maxmemory 200mb --maxmemory-policy allkeys-lru
+    command: redis-server --maxmemory 128mb --maxmemory-policy noeviction
     ports: ["127.0.0.1:6380:6379"]
     restart: unless-stopped

@@ -20,7 +20,6 @@
 
 body {
   margin: 0;
-  background: var(--paper);
   color: var(--ink);
   font-family: var(--sans);
   font-size: 15px;

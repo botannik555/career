@@ -18,11 +18,11 @@ const MAX_AGE = 60 * 60 * 24 * 30;
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16);
   const key = crypto.scryptSync(password, salt, 64, { N: 16384, r: 8, p: 1 });
-  return `scrypt$${salt.toString('hex')}$${key.toString('hex')}`;
+  return `scrypt:${salt.toString('hex')}:${key.toString('hex')}`;
 }
 
 export function verifyPassword(password: string, stored: string): boolean {
-  const [algo, saltHex, keyHex] = stored.split('$');
+  const [algo, saltHex, keyHex] = stored.split(':');
   if (algo !== 'scrypt') return false;
   const key = crypto.scryptSync(password, Buffer.from(saltHex, 'hex'), 64, { N: 16384, r: 8, p: 1 });
   const expected = Buffer.from(keyHex, 'hex');
