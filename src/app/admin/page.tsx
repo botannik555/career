@@ -60,6 +60,9 @@ export default async function Admin() {
     <div className="wrap">
       <div className="topbar">
         <h1>Панель управления</h1>
+        <a href="/career/upload" style={{ fontSize: 13, color: 'var(--ink-2)', textDecoration: 'none', marginLeft: 'auto', marginRight: 16 }}>
+          Загрузить резюме
+        </a>
         <span className="period">
           {new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
         </span>

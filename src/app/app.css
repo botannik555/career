@@ -1,0 +1,108 @@
+/* Страницы приложения. Палитра та же, что на главной, и тот же приём:
+   подтверждённое опытом — заливкой, просто заявленное — контуром. */
+
+.ap {
+  --paper: #e9ebe6;
+  --card: #ffffff;
+  --ink: #171a16;
+  --ink-2: #5a6158;
+  --ink-3: #8d948a;
+  --rule: #c9cec3;
+  --match: #2f5d3f;
+  --warn: #8c3a2b;
+
+  --display: 'Manrope', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--display);
+  min-height: 100vh;
+  padding-bottom: 80px;
+}
+.ap * { box-sizing: border-box; }
+.ap-wrap { max-width: 780px; margin: 0 auto; padding: 0 24px; }
+
+.ap-nav {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 22px 0; border-bottom: 1px solid var(--rule); margin-bottom: 44px;
+}
+.ap-nav .logo { font-family: var(--mono); font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; }
+.ap-nav a { font-size: 14px; color: var(--ink-2); text-decoration: none; }
+.ap-nav a:hover { color: var(--ink); }
+
+.ap h1 { font-size: 30px; font-weight: 800; letter-spacing: -0.03em; margin: 0 0 10px; }
+.ap p.lead { font-size: 16px; color: var(--ink-2); margin: 0 0 32px; max-width: 34em; }
+
+/* ---------- зона загрузки ---------- */
+
+.drop {
+  border: 1.5px dashed var(--ink-3); border-radius: 5px; background: var(--card);
+  padding: 52px 28px; text-align: center; cursor: pointer; display: block;
+  transition: border-color 0.15s, background 0.15s;
+}
+.drop:hover, .drop.over { border-color: var(--match); background: #f4f7f2; }
+.drop:focus-within { outline: 2px solid var(--match); outline-offset: 2px; }
+.drop .big { font-size: 17px; font-weight: 700; margin-bottom: 6px; }
+.drop .small { font-size: 14px; color: var(--ink-3); }
+.drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+.busy { background: var(--card); border: 1px solid var(--rule); border-radius: 5px; padding: 28px; }
+.busy .stage { display: flex; align-items: center; gap: 10px; font-size: 15px; margin-bottom: 8px; }
+.busy .stage.done { color: var(--match); }
+.busy .stage.wait { color: var(--ink-3); }
+.busy .tick { font-family: var(--mono); font-size: 13px; width: 16px; }
+.ap .err { color: var(--warn); font-size: 15px; margin-top: 16px; }
+.ap .hint { font-size: 13px; color: var(--ink-3); margin-top: 20px; }
+
+/* ---------- профиль ---------- */
+
+.pf-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 8px; }
+.pf-cost { font-family: var(--mono); font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+
+.pf-block { background: var(--card); border: 1px solid var(--rule); border-radius: 5px; padding: 22px; margin-bottom: 12px; }
+.pf-block h2 {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 500; margin: 0 0 16px;
+}
+.pf-block.check { border-color: var(--warn); }
+.pf-block.check h2 { color: var(--warn); }
+
+.pf-row { display: grid; grid-template-columns: 150px 1fr; gap: 14px; padding: 9px 0; font-size: 15px; }
+.pf-row + .pf-row { border-top: 1px solid #eef0ec; }
+.pf-row .k { color: var(--ink-2); font-size: 14px; }
+.pf-row .v { font-weight: 500; }
+.pf-row .v.empty { color: var(--ink-3); font-weight: 400; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-family: var(--mono); font-size: 12px; padding: 4px 9px; border-radius: 3px; }
+.chip.evidenced { background: var(--match); color: #fff; }
+.chip.listed { border: 1px dashed var(--ink-3); color: var(--ink-2); }
+.chips-note { font-size: 12px; color: var(--ink-3); margin-top: 12px; }
+
+.exp { padding: 12px 0; }
+.exp + .exp { border-top: 1px solid #eef0ec; }
+.exp .t { font-weight: 700; font-size: 15px; }
+.exp .c { font-size: 14px; color: var(--ink-2); }
+.exp .d { font-family: var(--mono); font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+.exp ul { margin: 8px 0 0; padding-left: 18px; }
+.exp li { font-size: 14px; color: var(--ink-2); margin-bottom: 3px; }
+
+.flag { display: flex; gap: 10px; font-size: 14px; padding: 8px 0; color: var(--ink-2); }
+.flag + .flag { border-top: 1px solid #eef0ec; }
+.flag .kind { font-family: var(--mono); font-size: 11px; color: var(--warn); min-width: 100px; }
+
+.pf-actions { display: flex; gap: 10px; margin-top: 24px; flex-wrap: wrap; }
+.btn {
+  padding: 11px 20px; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
+  background: var(--ink); color: var(--paper); border: none; border-radius: 3px; text-decoration: none;
+  display: inline-block;
+}
+.btn:hover { background: var(--match); }
+.btn.ghost { background: none; color: var(--ink-2); border: 1px solid var(--rule); }
+.btn.ghost:hover { color: var(--ink); border-color: var(--ink); }
+
+@media (max-width: 620px) {
+  .pf-row { grid-template-columns: 1fr; gap: 2px; }
+  .ap h1 { font-size: 25px; }
+}

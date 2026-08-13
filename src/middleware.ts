@@ -16,11 +16,14 @@ export async function middleware(req: NextRequest) {
     const { payload } = await jwtVerify(
       token, new TextEncoder().encode(process.env.AUTH_SECRET!),
     );
-    if (payload.role !== 'admin') return NextResponse.redirect(loginUrl);
+    if (!payload.role) return NextResponse.redirect(loginUrl);
+    if (req.nextUrl.pathname.startsWith('/admin') && payload.role !== 'admin') {
+      return NextResponse.redirect(loginUrl);
+    }
     return NextResponse.next();
   } catch {
     return NextResponse.redirect(loginUrl);
   }
 }
 
-export const config = { matcher: ['/admin/:path*'] };
+export const config = { matcher: ['/admin/:path*', '/upload/:path*', '/profile/:path*'] };
