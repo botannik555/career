@@ -1,15 +1,15 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import { logUsage } from './cost';
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+const BASE = process.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1';
 
 /**
- * Один вход для всех LLM-вызовов. Не зовите SDK напрямую из фич —
- * иначе расход перестанет попадать в ai_usage и себестоимость станет невидимой.
+ * Единственный вход для всех LLM-вызовов — через OpenRouter.
+ * Не зовите API напрямую из фич: тогда расход перестанет попадать
+ * в ai_usage и себестоимость станет невидимой.
  *
- * Структурированный вывод получаем через tool с input_schema: это надёжнее,
- * чем просить «ответь только JSON» — модель не может вернуть преамбулу.
+ * Структуру получаем через function calling: модель обязана вернуть
+ * аргументы по схеме и физически не может добавить преамбулу.
  */
 export async function callJson<T>(args: {
   userId: string | null;
@@ -21,50 +21,99 @@ export async function callJson<T>(args: {
   jsonSchema: Record<string, unknown>;
   maxTokens?: number;
 }): Promise<{ data: T; cost: number }> {
-  const res = await anthropic.messages.create({
-    model: args.model,
-    max_tokens: args.maxTokens ?? 4096,
-    system: args.system,
-    messages: [{ role: 'user', content: args.user }],
-    tools: [{
-      name: 'result',
-      description: 'Return the structured result.',
-      input_schema: args.jsonSchema as Anthropic.Tool.InputSchema,
-    }],
-    tool_choice: { type: 'tool', name: 'result' },
-  });
-
-  const cost = await logUsage({
-    userId: args.userId,
-    action: args.action,
-    model: args.model,
-    tokensIn: res.usage.input_tokens,
-    tokensOut: res.usage.output_tokens,
-  });
-
-  const block = res.content.find((b) => b.type === 'tool_use');
-  if (!block || block.type !== 'tool_use') {
-    throw new Error(`${args.action}: model returned no structured result`);
-  }
-
-  const parsed = args.schema.safeParse(block.input);
-  if (!parsed.success) {
-    throw new Error(`${args.action}: schema mismatch — ${parsed.error.message}`);
-  }
-  return { data: parsed.data, cost };
-}
-
-/** Embeddings у Anthropic нет; берём OpenAI 1536-dim под vector(1536) в схеме. */
-export async function embed(texts: string[]): Promise<number[][]> {
-  const res = await fetch('https://api.openai.com/v1/embeddings', {
+  const res = await fetch(`${BASE}/chat/completions`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      // OpenRouter показывает эти поля в статистике аккаунта.
+      'HTTP-Referer': process.env.APP_URL ?? 'https://meet.rbmclub.com/career',
+      'X-Title': 'career',
     },
-    body: JSON.stringify({ model: 'text-embedding-3-small', input: texts }),
+    body: JSON.stringify({
+      model: args.model,
+      max_tokens: args.maxTokens ?? 4096,
+      temperature: 0,
+      messages: [
+        { role: 'system', content: args.system },
+        { role: 'user', content: args.user },
+      ],
+      tools: [{
+        type: 'function',
+        function: {
+          name: 'result',
+          description: 'Return the structured result.',
+          parameters: args.jsonSchema,
+        },
+      }],
+      tool_choice: { type: 'function', function: { name: 'result' } },
+      // Просим вернуть реальную стоимость вызова, а не считать её по прайсу.
+      usage: { include: true },
+    }),
   });
-  if (!res.ok) throw new Error(`embeddings failed: ${res.status} ${await res.text()}`);
+
+  if (!res.ok) {
+    throw new Error(`${args.action}: OpenRouter ${res.status} — ${await res.text()}`);
+  }
+
+  const json = await res.json();
+
+  if (json.error) {
+    throw new Error(`${args.action}: ${json.error.message ?? 'ошибка провайдера'}`);
+  }
+
+  const usage = json.usage ?? {};
+  const cost = await logUsage({
+    userId: args.userId,
+    action: args.action,
+    model: json.model ?? args.model,
+    tokensIn: usage.prompt_tokens ?? 0,
+    tokensOut: usage.completion_tokens ?? 0,
+    // OpenRouter отдаёт фактическую цену — она точнее любой таблицы.
+    costUsd: typeof usage.cost === 'number' ? usage.cost : undefined,
+  });
+
+  const call = json.choices?.[0]?.message?.tool_calls?.[0];
+  if (!call?.function?.arguments) {
+    throw new Error(`${args.action}: модель не вернула структурированный результат`);
+  }
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(call.function.arguments);
+  } catch {
+    throw new Error(`${args.action}: аргументы не разобрались как JSON`);
+  }
+
+  const parsed = args.schema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error(`${args.action}: результат не сходится со схемой — ${parsed.error.message}`);
+  }
+
+  return { data: parsed.data, cost };
+}
+
+/**
+ * Embeddings. OpenRouter их не отдаёт, поэтому берём отдельного провайдера
+ * с OpenAI-совместимым эндпоинтом — по умолчанию сам OpenAI.
+ * Размерность обязана совпадать с vector(1536) в схеме БД.
+ */
+export async function embed(texts: string[]): Promise<number[][]> {
+  const base = process.env.EMBEDDINGS_BASE_URL ?? 'https://api.openai.com/v1';
+  const key = process.env.EMBEDDINGS_API_KEY ?? process.env.OPENAI_API_KEY;
+  const model = process.env.EMBEDDINGS_MODEL ?? 'text-embedding-3-small';
+
+  if (!key) {
+    throw new Error('Не задан EMBEDDINGS_API_KEY: без него поиск по вакансиям не работает.');
+  }
+
+  const res = await fetch(`${base}/embeddings`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model, input: texts }),
+  });
+  if (!res.ok) throw new Error(`embeddings: ${res.status} — ${await res.text()}`);
+
   const json = await res.json();
   return json.data.map((d: { embedding: number[] }) => d.embedding);
 }

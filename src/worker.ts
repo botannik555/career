@@ -16,7 +16,7 @@ export const q = {
  * 1. poll-agent — тянет вакансии по запросу агента и кладёт в общий кэш.
  *    LLM здесь не участвует: только hh.ru API и SQL.
  */
-new Worker('poll-agent', async (job) => {
+const pollW = new Worker("poll-agent", async (job) => {
   const { agentId } = job.data as { agentId: string };
   const { rows } = await pool.query(
     `SELECT id, query, profile_id, user_id FROM search_agents WHERE id = $1 AND active`,
@@ -26,8 +26,9 @@ new Worker('poll-agent', async (job) => {
   const agent = rows[0];
 
   const fresh: string[] = [];
-  for (let page = 0; page < 3; page++) {
-    const res = await searchVacancies(agent.query, page);
+  for (let page = 0; page < 1; page++) {
+    const res = await searchVacancies(agent.query, page, 20);
+    console.log("hh found", res.found, "items", res.items?.length, JSON.stringify(agent.query));
     for (const item of res.items) {
       // Полное описание тянем только для незнакомых вакансий.
       const known = await pool.query(`SELECT 1 FROM jobs WHERE id = $1`, [`hh:${item.id}`]);
@@ -47,7 +48,7 @@ new Worker('poll-agent', async (job) => {
  * 2. index-job — считает embedding вакансии ОДИН РАЗ на всех пользователей.
  *    Это и есть кэш из пункта 7: 1000 пользователей на одну вакансию — один вызов.
  */
-new Worker('index-job', async (job) => {
+const indexW = new Worker("index-job", async (job) => {
   const { jobId } = job.data as { jobId: string };
   const { rows } = await pool.query(
     `SELECT id, title, company, description FROM jobs
@@ -62,12 +63,12 @@ new Worker('index-job', async (job) => {
     `UPDATE jobs SET embedding = $2, analyzed_at = now() WHERE id = $1`,
     [j.id, toVector(vec)],
   );
-}, { connection, concurrency: 4 });
+}, { connection, concurrency: 1 });
 
 /**
  * 3. match-agent — префильтр по вектору, затем LLM только на топ-N.
  */
-new Worker('match-agent', async (job) => {
+const matchW = new Worker("match-agent", async (job) => {
   const { agentId } = job.data as { agentId: string };
   const { rows } = await pool.query(
     `SELECT a.id, a.profile_id, a.min_score, a.query, p.data AS profile, p.user_id
@@ -96,3 +97,18 @@ new Worker('match-agent', async (job) => {
 }, { connection, concurrency: 1 });  // LLM-очередь: одна за раз, бережём 2 CPU
 
 console.log('worker up');
+
+// Планировщик: раз в 15 минут ставим обход агентам, которые давно не обновлялись.
+setInterval(async () => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id FROM search_agents WHERE active
+         AND (last_run_at IS NULL OR last_run_at < now() - interval '30 minutes')`);
+    for (const r of rows) await q.poll.add('poll', { agentId: r.id });
+  } catch (e) { console.error('scheduler', e); }
+}, 15 * 60 * 1000);
+
+// Ошибки обработчиков BullMQ по умолчанию не печатаются — только оседают в Redis.
+for (const w of [pollW, indexW, matchW]) {
+  w.on('failed', (job, err) => console.error('FAILED', w.name, job?.id, err?.message));
+}

@@ -3,7 +3,7 @@ import { pool } from '../db';
 
 const BASE = 'https://api.hh.ru';
 
-/** hh.ru отклоняет запросы без осмысленного User-Agent. Подставьте контакт. */
+/** hh.ru отклоняет запросы без осмысленного User-Agent. */
 const UA = process.env.HH_USER_AGENT ?? 'career-app/0.1 (admin@rbmclub.com)';
 
 export interface HhQuery {
@@ -17,22 +17,86 @@ export interface HhQuery {
   period?: number;              // дней назад
 }
 
+/**
+ * Токен приложения. Анонимные запросы к /vacancies с зарубежных дата-центров
+ * hh.ru отдаёт 403, поэтому ходим с client_credentials-токеном.
+ * Держим в памяти процесса и обновляем заранее, за минуту до истечения.
+ */
+/**
+ * Токен приложения кэшируется В БАЗЕ, а не в памяти процесса.
+ * hh.ru выдаёт его на две недели и отказывает в повторном запросе раньше срока
+ * ("app token refresh too early"), поэтому перезапуск воркера не должен
+ * приводить к новому обращению за токеном.
+ */
+async function getToken(): Promise<string | null> {
+  const id = process.env.HH_CLIENT_ID;
+  const secret = process.env.HH_CLIENT_SECRET;
+  if (!id || !secret) return null;
+
+  const { rows } = await pool.query(
+    `SELECT token FROM app_tokens
+      WHERE provider = 'hh' AND expires_at > now() + interval '1 hour'`,
+  );
+  if (rows.length) return rows[0].token;
+
+  const res = await fetch(`${BASE}/token`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      'User-Agent': UA,
+    },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: id,
+      client_secret: secret,
+    }),
+  });
+
+  if (!res.ok) throw new Error(`hh.ru token ${res.status}: ${await res.text()}`);
+
+  const json = await res.json();
+  const ttl = json.expires_in ?? 1209600;
+
+  await pool.query(
+    `INSERT INTO app_tokens (provider, token, expires_at)
+     VALUES ('hh', $1, now() + make_interval(secs => $2))
+     ON CONFLICT (provider) DO UPDATE
+       SET token = EXCLUDED.token, expires_at = EXCLUDED.expires_at, updated_at = now()`,
+    [json.access_token, ttl],
+  );
+
+  return json.access_token;
+}
+
 async function hhGet(path: string, params: Record<string, unknown> = {}) {
   const url = new URL(BASE + path);
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
   }
-  const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' } });
 
+  const headers: Record<string, string> = { 'User-Agent': UA, Accept: 'application/json' };
+  const t = await getToken();
+  if (t) headers.Authorization = `Bearer ${t}`;
+
+  const res = await fetch(url, { headers });
+
+  if (res.status === 403) {
+    // Токен мог протухнуть раньше срока. Помечаем истёкшим, но новый запросим
+    // не сразу: hh.ru не даёт обновлять токен часто.
+    await pool.query(
+      `UPDATE app_tokens SET expires_at = now() WHERE provider = 'hh'`);
+    throw new Error(`hh.ru 403: ${await res.text()}`);
+  }
   if (res.status === 429) {
     throw Object.assign(new Error('hh.ru rate limit'), { retryable: true });
   }
   if (!res.ok) throw new Error(`hh.ru ${res.status}: ${await res.text()}`);
+
   return res.json();
 }
 
 /** Список вакансий. Отдаёт только «шапки», без полного описания. */
-export async function searchVacancies(q: HhQuery, page = 0, perPage = 100) {
+export async function searchVacancies(q: HhQuery, page = 0, perPage = 20) {
   return hhGet('/vacancies', { ...q, page, per_page: perPage });
 }
 
@@ -43,8 +107,7 @@ export async function getVacancy(id: string) {
 
 /**
  * Отпечаток для склейки дублей между источниками.
- * Компания + нормализованный тайтл + вилка. Одна и та же вакансия на hh,
- * LinkedIn и сайте компании даст один fingerprint.
+ * Компания + нормализованный тайтл + вилка.
  */
 export function fingerprint(v: {
   company?: string | null; title: string;
@@ -83,9 +146,9 @@ function stripHtml(html?: string | null): string {
 }
 
 /**
- * Сохраняет вакансию в глобальный кэш. Повторный вызов для той же вакансии
- * только обновляет last_seen_at — описание и LLM-разбор не трогаются,
- * поэтому анализ каждой вакансии делается ровно один раз на всех пользователей.
+ * Сохраняет вакансию в глобальный кэш. Повторный вызов только обновляет
+ * last_seen_at — описание и разбор не трогаются, поэтому анализ каждой
+ * вакансии делается один раз на всех пользователей.
  */
 export async function upsertVacancy(raw: any): Promise<{ id: string; isNew: boolean }> {
   const id = `hh:${raw.id}`;
@@ -116,7 +179,6 @@ export async function upsertVacancy(raw: any): Promise<{ id: string; isNew: bool
 
   const isNew = rows[0].is_new as boolean;
 
-  // Дубль по отпечатку — привязываем к самой ранней вакансии.
   if (isNew) {
     await pool.query(
       `UPDATE jobs SET canonical_id = c.id

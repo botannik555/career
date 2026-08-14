@@ -47,7 +47,7 @@ export async function extractProfile(args: {
     user: `Резюме:\n\n<resume>\n${text}\n</resume>`,
     schema: CandidateProfile,
     jsonSchema,
-    maxTokens: 8000,
+    maxTokens: 5000,
   });
 
   const [vec] = await embed([profileToEmbeddingText(profile)]);
